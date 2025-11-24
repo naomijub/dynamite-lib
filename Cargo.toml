@@ -9,3 +9,12 @@ name = "dylib"
 
 [dependencies]
 libc = "0.2.177"
+
+[lints.clippy]
+all = "deny"
+or_fun_call = "deny"
+redundant_clone = "deny"
+missing_const_for_fn = "deny"
+needless_collect = "deny"
+unwrap_used = "deny"
+expect_used = "deny"

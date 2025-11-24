@@ -12,10 +12,12 @@
 //!
 //! A simple wrapper over the platform's dynamic library facilities
 
-use std::env;
-use std::ffi::{CString, OsString};
-use std::mem;
-use std::path::{Path, PathBuf};
+use std::{
+    env,
+    ffi::{CString, OsString},
+    mem,
+    path::{Path, PathBuf},
+};
 
 pub struct DynamicLibrary {
     handle: *mut u8,
@@ -49,7 +51,7 @@ impl DynamicLibrary {
         // run.
         match maybe_library {
             Err(err) => Err(err),
-            Ok(handle) => Ok(DynamicLibrary { handle: handle }),
+            Ok(handle) => Ok(DynamicLibrary { handle }),
         }
     }
 
@@ -58,10 +60,12 @@ impl DynamicLibrary {
         let mut search_path = DynamicLibrary::search_path();
         search_path.insert(0, path.to_path_buf());
         // TODO: Audit that the environment access only happens in single-threaded code.
-        unsafe { env::set_var(
-            DynamicLibrary::envvar(),
-            &DynamicLibrary::create_path(&search_path),
-        ) };
+        unsafe {
+            env::set_var(
+                DynamicLibrary::envvar(),
+                DynamicLibrary::create_path(&search_path),
+            )
+        };
     }
 
     /// From a slice of paths, create a new vector which is suitable to be an
@@ -79,7 +83,7 @@ impl DynamicLibrary {
 
     /// Returns the environment variable for this process's dynamic library
     /// search path
-    pub fn envvar() -> &'static str {
+    pub const fn envvar() -> &'static str {
         if cfg!(windows) {
             "PATH"
         } else if cfg!(target_os = "macos") {
@@ -89,7 +93,7 @@ impl DynamicLibrary {
         }
     }
 
-    fn separator() -> &'static str {
+    const fn separator() -> &'static str {
         if cfg!(windows) { ";" } else { ":" }
     }
 
@@ -103,28 +107,33 @@ impl DynamicLibrary {
     }
 
     /// Access the value at the symbol of the dynamic library
-    pub unsafe fn symbol<T>(&self, symbol: &str) -> Result<*mut T, String> { unsafe {
-        // This function should have a lifetime constraint of 'a on
-        // T but that feature is still unimplemented
+    #[allow(clippy::missing_safety_doc)]
+    pub unsafe fn symbol<T>(&self, symbol: &str) -> Result<*mut T, String> {
+        unsafe {
+            // This function should have a lifetime constraint of 'a on
+            // T but that feature is still unimplemented
 
-        let raw_string = CString::new(symbol).unwrap();
-        let maybe_symbol_value =
-            dl::check_for_errors_in(|| dl::symbol(self.handle, raw_string.as_ptr()));
+            let Ok(raw_string) = CString::new(symbol) else {
+                return Err(format!("failed to access `{symbol}`"));
+            };
+            let maybe_symbol_value =
+                dl::check_for_errors_in(|| dl::symbol(self.handle, raw_string.as_ptr()));
 
-        // The value must not be constructed if there is an error so
-        // the destructor does not run.
-        match maybe_symbol_value {
-            Err(err) => Err(err),
-            Ok(symbol_value) => Ok(mem::transmute(symbol_value)),
+            // The value must not be constructed if there is an error so
+            // the destructor does not run.
+            match maybe_symbol_value {
+                Err(err) => Err(err),
+                Ok(symbol_value) => Ok(mem::transmute::<*mut u8, *mut T>(symbol_value)),
+            }
         }
-    }}
+    }
 }
 
 #[cfg(all(test, not(target_os = "ios")))]
 mod test {
+    use std::{mem, path::Path};
+
     use super::*;
-    use std::mem;
-    use std::path::Path;
 
     #[test]
     #[cfg_attr(any(windows, target_os = "android"), ignore)] // FIXME #8818, #10379
@@ -139,7 +148,7 @@ mod test {
         let cosine: extern "C" fn(libc::c_double) -> libc::c_double = unsafe {
             match libm.symbol("cos") {
                 Err(error) => panic!("Could not load function cos: {}", error),
-                Ok(cosine) => mem::transmute::<*mut u8, _>(cosine),
+                Ok(cosine) => mem::transmute::<*mut u8, extern "C" fn(f64) -> f64>(cosine),
             }
         };
 
@@ -149,36 +158,45 @@ mod test {
         if result != expected_result {
             panic!(
                 "cos({}) != {} but equaled {} instead",
-                argument,
-                expected_result,
-                result
+                argument, expected_result, result
             )
         }
     }
 
     #[test]
-    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd",
-                target_os = "dragonfly", target_os = "openbsd"))]
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd"
+    ))]
     fn test_errors_do_not_crash() {
         // Open /dev/null as a library to get an error, and make sure
         // that only causes an error, and not a crash.
         let path = Path::new("/dev/null");
-        match DynamicLibrary::open(Some(&path)) {
+        match DynamicLibrary::open(Some(path)) {
             Err(_) => {}
             Ok(_) => panic!("Successfully opened the empty library."),
         }
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "ios",
-            target_os = "freebsd", target_os = "dragonfly",
-            target_os = "openbsd"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd"
+))]
 mod dl {
-    use std::ffi::{CStr, OsStr, CString};
-    use std::os::unix::ffi::OsStrExt;
-    use std::str;
-    use std::ptr;
-    use libc;
+    use std::{
+        ffi::{CStr, CString, OsStr},
+        os::unix::ffi::OsStrExt,
+        ptr, str,
+    };
 
     pub fn open(filename: Option<&OsStr>) -> Result<*mut u8, String> {
         check_for_errors_in(|| unsafe {
@@ -191,14 +209,18 @@ mod dl {
 
     const LAZY: libc::c_int = 1;
 
-    unsafe fn open_external(filename: &OsStr) -> *mut u8 { unsafe {
-        let s = CString::new(filename.as_bytes()).unwrap(); //to_cstring().unwrap();
-        dlopen(s.as_ptr(), LAZY) as *mut u8
-    }}
+    unsafe fn open_external(filename: &OsStr) -> *mut u8 {
+        unsafe {
+            let Ok(s) = CString::new(filename.as_bytes()) else {
+                panic!("failed to open external `{}`", filename.to_string_lossy());
+            };
+            dlopen(s.as_ptr(), LAZY) as *mut u8
+        }
+    }
 
-    unsafe fn open_internal() -> *mut u8 { unsafe {
-        dlopen(ptr::null(), LAZY) as *mut u8
-    }}
+    unsafe fn open_internal() -> *mut u8 {
+        unsafe { dlopen(ptr::null(), LAZY) as *mut u8 }
+    }
 
     pub fn check_for_errors_in<T, F>(f: F) -> Result<T, String>
     where
@@ -212,18 +234,22 @@ mod dl {
                 Ok(result)
             } else {
                 let s = CStr::from_ptr(last_error).to_bytes();
-                Err(str::from_utf8(s).unwrap().to_string())
+                let error = str::from_utf8(s)
+                    .map_err(|e| format!("failed to check for errors: {e}"))?
+                    .to_string();
+                Err(error)
             }
         }
     }
 
-    pub unsafe fn symbol(handle: *mut u8, symbol: *const libc::c_char) -> *mut u8 { unsafe {
-        dlsym(handle as *mut libc::c_void, symbol) as *mut u8
-    }}
-    pub unsafe fn close(handle: *mut u8) { unsafe {
-        dlclose(handle as *mut libc::c_void);
-        ()
-    }}
+    pub unsafe fn symbol(handle: *mut u8, symbol: *const libc::c_char) -> *mut u8 {
+        unsafe { dlsym(handle as *mut libc::c_void, symbol) as *mut u8 }
+    }
+    pub unsafe fn close(handle: *mut u8) {
+        unsafe {
+            dlclose(handle as *mut libc::c_void);
+        }
+    }
 
     unsafe extern "C" {
         fn dlopen(filename: *const libc::c_char, flag: libc::c_int) -> *mut libc::c_void;
@@ -235,19 +261,22 @@ mod dl {
 
 #[cfg(target_os = "windows")]
 mod dl {
-    use std::ffi::OsStr;
-    use std::iter::Iterator;
-    use std::libc::consts::os::extra::ERROR_CALL_NOT_IMPLEMENTED;
-    use std::ops::FnOnce;
-    use std::sys::os;
-    use std::os::windows::prelude::*;
-    use std::option::Option::{self, Some, None};
-    use std::ptr;
-    use std::result::Result;
-    use std::result::Result::{Ok, Err};
-    use std::string::String;
-    use std::vec::Vec;
-    use std::sys::c::compat::kernel32::SetThreadErrorMode;
+    use std::{
+        ffi::OsStr,
+        iter::Iterator,
+        libc::consts::os::extra::ERROR_CALL_NOT_IMPLEMENTED,
+        ops::FnOnce,
+        option::Option::{self, None, Some},
+        os::windows::prelude::*,
+        ptr,
+        result::{
+            Result,
+            Result::{Err, Ok},
+        },
+        string::String,
+        sys::{c::compat::kernel32::SetThreadErrorMode, os},
+        vec::Vec,
+    };
 
     pub fn open(filename: Option<&OsStr>) -> Result<*mut u8, String> {
         // disable "dll load failed" error dialog.
