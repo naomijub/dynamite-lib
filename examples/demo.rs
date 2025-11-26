@@ -1,6 +1,6 @@
 use std::{mem, path::Path};
 
-use dylib::DynamicLibrary;
+use dynamite::DynamicLibrary;
 
 fn main() {
     #[cfg(target_os = "macos")]
