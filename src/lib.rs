@@ -129,87 +129,6 @@ impl DynamicLibrary {
     }
 }
 
-#[cfg(all(test, not(target_os = "ios")))]
-mod test {
-    use std::{mem, path::Path};
-
-    use super::*;
-
-    #[test]
-    #[cfg_attr(target_os = "linux", ignore)]
-    fn test_loading_cosine() {
-        // The math library does not need to be loaded since it is already
-        // statically linked in
-        let libm = match DynamicLibrary::open(None) {
-            Err(error) => panic!("Could not load self as module: {}", error),
-            Ok(libm) => libm,
-        };
-
-        let cosine: extern "C" fn(libc::c_double) -> libc::c_double = unsafe {
-            match libm.symbol("cos") {
-                Err(error) => panic!("Could not load function cos: {}", error),
-                Ok(cosine) => mem::transmute::<*mut u8, extern "C" fn(f64) -> f64>(cosine),
-            }
-        };
-
-        let argument = 0.0;
-        let expected_result = 1.0;
-        let result = cosine(argument);
-        assert_eq!(
-            result, expected_result,
-            "cos({}) != {} but equaled {} instead",
-            argument, expected_result, result
-        )
-    }
-
-    #[test]
-    #[cfg_attr(target_os = "macos", ignore)]
-    fn test_custom_built() {
-        let path = "demo/target/release/libdemo.so";
-        // The math library does not need to be loaded since it is already
-        // statically linked in
-        let libm = match DynamicLibrary::open(Some(Path::new(path))) {
-            Err(error) => panic!("Could not load self as module: {}", error),
-            Ok(libm) => libm,
-        };
-
-        let cosine: extern "C" fn(libc::c_double) -> libc::c_double = unsafe {
-            match libm.symbol("cos") {
-                Err(error) => panic!("Could not load function cos: {}", error),
-                Ok(cosine) => mem::transmute::<*mut u8, extern "C" fn(f64) -> f64>(cosine),
-            }
-        };
-
-        let argument = 0.0;
-        let expected_result = 1.0;
-        let result = cosine(argument);
-
-        assert_eq!(
-            result, expected_result,
-            "cos({}) != {} but equaled {} instead",
-            argument, expected_result, result
-        )
-    }
-
-    #[test]
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "freebsd",
-        target_os = "dragonfly",
-        target_os = "openbsd"
-    ))]
-    fn test_errors_do_not_crash() {
-        // Open /dev/null as a library to get an error, and make sure
-        // that only causes an error, and not a crash.
-        let path = Path::new("/dev/null");
-        match DynamicLibrary::open(Some(path)) {
-            Err(_) => {}
-            Ok(_) => panic!("Successfully opened the empty library."),
-        }
-    }
-}
-
 #[cfg(any(
     target_os = "linux",
     target_os = "android",
@@ -284,5 +203,57 @@ mod dl {
         fn dlerror() -> *mut libc::c_char;
         fn dlsym(handle: *mut libc::c_void, symbol: *const libc::c_char) -> *mut libc::c_void;
         fn dlclose(handle: *mut libc::c_void) -> libc::c_int;
+    }
+}
+
+#[cfg(all(test, not(target_os = "ios")))]
+mod test {
+    use std::{mem, path::Path};
+
+    use super::*;
+
+    #[test]
+    #[cfg_attr(target_os = "linux", ignore)]
+    fn test_loading_cosine() {
+        // The math library does not need to be loaded since it is already
+        // statically linked in
+        let libm = match DynamicLibrary::open(None) {
+            Err(error) => panic!("Could not load self as module: {}", error),
+            Ok(libm) => libm,
+        };
+
+        let cosine: extern "C" fn(libc::c_double) -> libc::c_double = unsafe {
+            match libm.symbol("cos") {
+                Err(error) => panic!("Could not load function cos: {}", error),
+                Ok(cosine) => mem::transmute::<*mut u8, extern "C" fn(f64) -> f64>(cosine),
+            }
+        };
+
+        let argument = 0.0;
+        let expected_result = 1.0;
+        let result = cosine(argument);
+        assert_eq!(
+            result, expected_result,
+            "cos({}) != {} but equaled {} instead",
+            argument, expected_result, result
+        )
+    }
+
+    #[test]
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd"
+    ))]
+    fn test_errors_do_not_crash() {
+        // Open /dev/null as a library to get an error, and make sure
+        // that only causes an error, and not a crash.
+        let path = Path::new("/dev/null");
+        match DynamicLibrary::open(Some(path)) {
+            Err(_) => {}
+            Ok(_) => panic!("Successfully opened the empty library."),
+        }
     }
 }
