@@ -11,7 +11,7 @@ name = "dylib"
 libc = "0.2.177"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation"] } 
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization"] } 
 
 
 [lints.clippy]

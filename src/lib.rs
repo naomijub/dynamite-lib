@@ -263,11 +263,11 @@ mod dl {
 #[cfg(target_os = "windows")]
 mod dl {
     use std::{
-        ffi::OsStr,
+        ffi::{OsStr, OsString},
         iter::Iterator,
         ops::FnOnce,
         option::Option::{self, None, Some},
-        os::windows::prelude::*,
+        os::windows::{ffi::OsStringExt, prelude::*},
         ptr,
         result::{
             Result,
@@ -275,10 +275,15 @@ mod dl {
         },
         string::String,
         vec::Vec,
-        windows_sys::Win32::{
-            Foundation::{BOOL, ERROR_CALL_NOT_IMPLEMENTED, GetLastError},
-            System::Diagnostics::Debug::SetThreadErrorMode,
+    };
+
+    use windows_sys::Win32::{
+        Foundation::{
+            BOOL, ERROR_CALL_NOT_IMPLEMENTED, FORMAT_MESSAGE_FROM_SYSTEM,
+            FORMAT_MESSAGE_IGNORE_INSERTS, GetLastError,
         },
+        Globalization::FormatMessageW,
+        System::Diagnostics::Debug::SetThreadErrorMode,
     };
 
     pub fn open(filename: Option<&OsStr>) -> Result<*mut u8, String> {
@@ -325,13 +330,8 @@ mod dl {
             }
             None => {
                 let mut handle = ptr::null_mut();
-                let succeeded = unsafe {
-                    GetModuleHandleExW(
-                        0 as windows_sys::Win32::Foundation::DWORD,
-                        ptr::null(),
-                        &mut handle,
-                    )
-                };
+                let succeeded =
+                    unsafe { GetModuleHandleExW(0 as libc::c_uint, ptr::null(), &mut handle) };
                 if succeeded == 0 {
                     let errno = GetLastError();
                     Err(win_error_string(errno))
@@ -383,7 +383,7 @@ mod dl {
         fn SetLastError(error: libc::size_t);
         fn LoadLibraryW(name: *const libc::c_void) -> *mut libc::c_void;
         fn GetModuleHandleExW(
-            dwFlags: windows_sys::Win32::Foundation::DWORD,
+            dwFlags: libc::c_uint,
             name: *const u16,
             handle: *mut *mut libc::c_void,
         ) -> BOOL;
@@ -394,13 +394,6 @@ mod dl {
         fn FreeLibrary(handle: *mut libc::c_void);
         fn SetErrorMode(uMode: libc::c_uint) -> libc::c_uint;
     }
-
-    use std::os::windows::ffi::OsStringExt;
-
-    use windows_sys::Win32::{
-        Foundation::{FORMAT_MESSAGE_FROM_SYSTEM, FORMAT_MESSAGE_IGNORE_INSERTS},
-        Globalization::FormatMessageW,
-    };
 
     fn win_error_string(err: u32) -> String {
         let mut buffer: [u16; 512] = [0; 512];
