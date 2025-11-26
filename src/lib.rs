@@ -11,6 +11,8 @@
 //! Dynamic library facilities.
 //!
 //! A simple wrapper over the platform's dynamic library facilities
+//!
+//! Linux and macOS only
 
 use std::{
     env,
@@ -84,9 +86,7 @@ impl DynamicLibrary {
     /// Returns the environment variable for this process's dynamic library
     /// search path
     pub const fn envvar() -> &'static str {
-        if cfg!(windows) {
-            "PATH"
-        } else if cfg!(target_os = "macos") {
+        if cfg!(target_os = "macos") {
             "DYLD_LIBRARY_PATH"
         } else {
             "LD_LIBRARY_PATH"
@@ -94,7 +94,7 @@ impl DynamicLibrary {
     }
 
     const fn separator() -> &'static str {
-        if cfg!(windows) { ";" } else { ":" }
+        ":"
     }
 
     /// Returns the current search path for dynamic libraries being used by this
@@ -125,60 +125,6 @@ impl DynamicLibrary {
                 Err(err) => Err(err),
                 Ok(symbol_value) => Ok(mem::transmute::<*mut u8, *mut T>(symbol_value)),
             }
-        }
-    }
-}
-
-#[cfg(all(test, not(target_os = "ios")))]
-mod test {
-    #[allow(unused)]
-    use std::{mem, path::Path};
-
-    use super::*;
-
-    #[test]
-    #[cfg_attr(any(windows, target_os = "android"), ignore)] // FIXME #8818, #10379
-    fn test_loading_cosine() {
-        // The math library does not need to be loaded since it is already
-        // statically linked in
-        let libm = match DynamicLibrary::open(None) {
-            Err(error) => panic!("Could not load self as module: {}", error),
-            Ok(libm) => libm,
-        };
-
-        let cosine: extern "C" fn(libc::c_double) -> libc::c_double = unsafe {
-            match libm.symbol("cos") {
-                Err(error) => panic!("Could not load function cos: {}", error),
-                Ok(cosine) => mem::transmute::<*mut u8, extern "C" fn(f64) -> f64>(cosine),
-            }
-        };
-
-        let argument = 0.0;
-        let expected_result = 1.0;
-        let result = cosine(argument);
-        if result != expected_result {
-            panic!(
-                "cos({}) != {} but equaled {} instead",
-                argument, expected_result, result
-            )
-        }
-    }
-
-    #[test]
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "freebsd",
-        target_os = "dragonfly",
-        target_os = "openbsd"
-    ))]
-    fn test_errors_do_not_crash() {
-        // Open /dev/null as a library to get an error, and make sure
-        // that only causes an error, and not a crash.
-        let path = Path::new("/dev/null");
-        match DynamicLibrary::open(Some(path)) {
-            Err(_) => {}
-            Ok(_) => panic!("Successfully opened the empty library."),
         }
     }
 }
@@ -260,172 +206,54 @@ mod dl {
     }
 }
 
-#[cfg(target_os = "windows")]
-mod dl {
-    use std::{
-        ffi::OsStr,
-        iter::Iterator,
-        ops::FnOnce,
-        option::Option::{self, None, Some},
-        os::windows::prelude::*,
-        ptr,
-        result::{
-            Result,
-            Result::{Err, Ok},
-        },
-        string::String,
-        vec::Vec,
-        windows_sys::Win32::{
-            Foundation::{BOOL, ERROR_CALL_NOT_IMPLEMENTED, GetLastError},
-            System::Diagnostics::Debug::SetThreadErrorMode,
-        },
-    };
+#[cfg(all(test, not(target_os = "ios")))]
+mod test {
+    use std::{mem, path::Path};
 
-    pub fn open(filename: Option<&OsStr>) -> Result<*mut u8, String> {
-        // disable "dll load failed" error dialog.
-        let mut use_thread_mode = true;
-        let prev_error_mode = unsafe {
-            // SEM_FAILCRITICALERRORS 0x01
-            let new_error_mode = 1;
-            let mut prev_error_mode = 0;
-            // Windows >= 7 supports thread error mode.
-            let result = SetThreadErrorMode(new_error_mode, &mut prev_error_mode);
-            if result == 0 {
-                let err = GetLastError();
-                if err as libc::c_int == ERROR_CALL_NOT_IMPLEMENTED {
-                    use_thread_mode = false;
-                    // SetThreadErrorMode not found. use fallback solution:
-                    // SetErrorMode() Note that SetErrorMode is process-wide so
-                    // this can cause race condition!  However, since even
-                    // Windows APIs do not care of such problem (#20650), we
-                    // just assume SetErrorMode race is not a great deal.
-                    prev_error_mode = SetErrorMode(new_error_mode);
-                }
-            }
-            prev_error_mode
+    use super::*;
+
+    #[test]
+    #[cfg_attr(target_os = "linux", ignore)]
+    fn test_loading_cosine() {
+        // The math library does not need to be loaded since it is already
+        // statically linked in
+        let libm = match DynamicLibrary::open(None) {
+            Err(error) => panic!("Could not load self as module: {}", error),
+            Ok(libm) => libm,
         };
 
-        unsafe {
-            SetLastError(0);
-        }
-
-        let result = match filename {
-            Some(filename) => {
-                let filename_str: Vec<_> =
-                    filename.encode_wide().chain(Some(0).into_iter()).collect();
-                let result = unsafe { LoadLibraryW(filename_str.as_ptr() as *const libc::c_void) };
-                // beware: Vec/String may change errno during drop!
-                // so we get error here.
-                if result == ptr::null_mut() {
-                    let errno = GetLastError();
-                    Err(win_error_string(errno))
-                } else {
-                    Ok(result as *mut u8)
-                }
-            }
-            None => {
-                let mut handle = ptr::null_mut();
-                let succeeded = unsafe {
-                    GetModuleHandleExW(
-                        0 as windows_sys::Win32::Foundation::DWORD,
-                        ptr::null(),
-                        &mut handle,
-                    )
-                };
-                if succeeded == 0 {
-                    let errno = GetLastError();
-                    Err(win_error_string(errno))
-                } else {
-                    Ok(handle as *mut u8)
-                }
+        let cosine: extern "C" fn(libc::c_double) -> libc::c_double = unsafe {
+            match libm.symbol("cos") {
+                Err(error) => panic!("Could not load function cos: {}", error),
+                Ok(cosine) => mem::transmute::<*mut u8, extern "C" fn(f64) -> f64>(cosine),
             }
         };
 
-        unsafe {
-            if use_thread_mode {
-                SetThreadErrorMode(prev_error_mode, ptr::null_mut());
-            } else {
-                SetErrorMode(prev_error_mode);
-            }
-        }
-
-        result
+        let argument = 0.0;
+        let expected_result = 1.0;
+        let result = cosine(argument);
+        assert_eq!(
+            result, expected_result,
+            "cos({}) != {} but equaled {} instead",
+            argument, expected_result, result
+        )
     }
 
-    pub fn check_for_errors_in<T, F>(f: F) -> Result<T, String>
-    where
-        F: FnOnce() -> T,
-    {
-        unsafe {
-            SetLastError(0);
-
-            let result = f();
-
-            let error = GetLastError();
-            if 0 == error {
-                Ok(result)
-            } else {
-                Err(format!("Error code {}", error))
-            }
-        }
-    }
-
-    pub unsafe fn symbol(handle: *mut u8, symbol: *const libc::c_char) -> *mut u8 {
-        GetProcAddress(handle as *mut libc::c_void, symbol) as *mut u8
-    }
-    pub unsafe fn close(handle: *mut u8) {
-        FreeLibrary(handle as *mut libc::c_void);
-        ()
-    }
-
-    #[allow(non_snake_case)]
-    unsafe extern "system" {
-        fn SetLastError(error: libc::size_t);
-        fn LoadLibraryW(name: *const libc::c_void) -> *mut libc::c_void;
-        fn GetModuleHandleExW(
-            dwFlags: windows_sys::Win32::Foundation::DWORD,
-            name: *const u16,
-            handle: *mut *mut libc::c_void,
-        ) -> BOOL;
-        fn GetProcAddress(
-            handle: *mut libc::c_void,
-            name: *const libc::c_char,
-        ) -> *mut libc::c_void;
-        fn FreeLibrary(handle: *mut libc::c_void);
-        fn SetErrorMode(uMode: libc::c_uint) -> libc::c_uint;
-    }
-
-    use std::os::windows::ffi::OsStringExt;
-
-    use windows_sys::Win32::{
-        Foundation::{FORMAT_MESSAGE_FROM_SYSTEM, FORMAT_MESSAGE_IGNORE_INSERTS},
-        Globalization::FormatMessageW,
-    };
-
-    fn win_error_string(err: u32) -> String {
-        let mut buffer: [u16; 512] = [0; 512];
-
-        unsafe {
-            let len = FormatMessageW(
-                FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                std::ptr::null(),
-                err,
-                0, // language ID (0 = auto)
-                buffer.as_mut_ptr(),
-                buffer.len() as u32,
-                std::ptr::null_mut(),
-            );
-
-            if len == 0 {
-                return format!("OS Error {}", err);
-            }
-
-            // Convert UTF-16 → Rust string
-            let msg = OsString::from_wide(&buffer[..len as usize])
-                .to_string_lossy()
-                .into_owned();
-
-            msg.trim().to_string() // remove extra newline added by Windows
+    #[test]
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "openbsd"
+    ))]
+    fn test_errors_do_not_crash() {
+        // Open /dev/null as a library to get an error, and make sure
+        // that only causes an error, and not a crash.
+        let path = Path::new("/dev/null");
+        match DynamicLibrary::open(Some(path)) {
+            Err(_) => {}
+            Ok(_) => panic!("Successfully opened the empty library."),
         }
     }
 }
