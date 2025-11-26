@@ -11,7 +11,7 @@
 //! Dynamic library facilities.
 //!
 //! A simple wrapper over the platform's dynamic library facilities
-//! 
+//!
 //! Linux and macOS only
 
 use std::{
@@ -155,12 +155,15 @@ mod test {
         let argument = 0.0;
         let expected_result = 1.0;
         let result = cosine(argument);
-        assert_eq!(result, expected_result, "cos({}) != {} but equaled {} instead",
-                argument, expected_result, result)
+        assert_eq!(
+            result, expected_result,
+            "cos({}) != {} but equaled {} instead",
+            argument, expected_result, result
+        )
     }
 
     #[test]
-    #[cfg_attr(target_os = "macos", ignore)] 
+    #[cfg_attr(target_os = "macos", ignore)]
     fn test_custom_built() {
         let path = "demo/target/release/libdemo.so";
         // The math library does not need to be loaded since it is already
@@ -181,8 +184,11 @@ mod test {
         let expected_result = 1.0;
         let result = cosine(argument);
 
-        assert_eq!(result, expected_result, "cos({}) != {} but equaled {} instead",
-                argument, expected_result, result)
+        assert_eq!(
+            result, expected_result,
+            "cos({}) != {} but equaled {} instead",
+            argument, expected_result, result
+        )
     }
 
     #[test]
@@ -280,4 +286,3 @@ mod dl {
         fn dlclose(handle: *mut libc::c_void) -> libc::c_int;
     }
 }
-
