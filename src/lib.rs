@@ -11,6 +11,8 @@
 //! Dynamic library facilities.
 //!
 //! A simple wrapper over the platform's dynamic library facilities
+//! 
+//! Linux and macOS only
 
 use std::{
     env,
@@ -84,9 +86,7 @@ impl DynamicLibrary {
     /// Returns the environment variable for this process's dynamic library
     /// search path
     pub const fn envvar() -> &'static str {
-        if cfg!(windows) {
-            "PATH"
-        } else if cfg!(target_os = "macos") {
+        if cfg!(target_os = "macos") {
             "DYLD_LIBRARY_PATH"
         } else {
             "LD_LIBRARY_PATH"
@@ -94,7 +94,7 @@ impl DynamicLibrary {
     }
 
     const fn separator() -> &'static str {
-        if cfg!(windows) { ";" } else { ":" }
+        ":"
     }
 
     /// Returns the current search path for dynamic libraries being used by this
@@ -131,13 +131,12 @@ impl DynamicLibrary {
 
 #[cfg(all(test, not(target_os = "ios")))]
 mod test {
-    #[allow(unused)]
     use std::{mem, path::Path};
 
     use super::*;
 
     #[test]
-    #[cfg_attr(any(windows, target_os = "android"), ignore)] // FIXME #8818, #10379
+    #[cfg_attr(target_os = "linux", ignore)]
     fn test_loading_cosine() {
         // The math library does not need to be loaded since it is already
         // statically linked in
@@ -156,12 +155,34 @@ mod test {
         let argument = 0.0;
         let expected_result = 1.0;
         let result = cosine(argument);
-        if result != expected_result {
-            panic!(
-                "cos({}) != {} but equaled {} instead",
-                argument, expected_result, result
-            )
-        }
+        assert_eq!(result, expected_result, "cos({}) != {} but equaled {} instead",
+                argument, expected_result, result)
+    }
+
+    #[test]
+    #[cfg_attr(target_os = "macos", ignore)] 
+    fn test_custom_built() {
+        let path = "demo/target/release/libdemo.so";
+        // The math library does not need to be loaded since it is already
+        // statically linked in
+        let libm = match DynamicLibrary::open(Some(Path::new(path))) {
+            Err(error) => panic!("Could not load self as module: {}", error),
+            Ok(libm) => libm,
+        };
+
+        let cosine: extern "C" fn(libc::c_double) -> libc::c_double = unsafe {
+            match libm.symbol("cos") {
+                Err(error) => panic!("Could not load function cos: {}", error),
+                Ok(cosine) => mem::transmute::<*mut u8, extern "C" fn(f64) -> f64>(cosine),
+            }
+        };
+
+        let argument = 0.0;
+        let expected_result = 1.0;
+        let result = cosine(argument);
+
+        assert_eq!(result, expected_result, "cos({}) != {} but equaled {} instead",
+                argument, expected_result, result)
     }
 
     #[test]
