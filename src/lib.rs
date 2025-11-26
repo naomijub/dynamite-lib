@@ -131,6 +131,7 @@ impl DynamicLibrary {
 
 #[cfg(all(test, not(target_os = "ios")))]
 mod test {
+    #[allow(unused)]
     use std::{mem, path::Path};
 
     use super::*;
@@ -264,7 +265,6 @@ mod dl {
     use std::{
         ffi::OsStr,
         iter::Iterator,
-        libc::consts::os::extra::ERROR_CALL_NOT_IMPLEMENTED,
         ops::FnOnce,
         option::Option::{self, None, Some},
         os::windows::prelude::*,
@@ -274,8 +274,11 @@ mod dl {
             Result::{Err, Ok},
         },
         string::String,
-        sys::{c::compat::kernel32::SetThreadErrorMode, os},
         vec::Vec,
+        windows_sys::Win32::{
+            Foundation::{BOOL, ERROR_CALL_NOT_IMPLEMENTED, GetLastError},
+            System::Diagnostics::Debug::SetThreadErrorMode,
+        },
     };
 
     pub fn open(filename: Option<&OsStr>) -> Result<*mut u8, String> {
@@ -288,7 +291,7 @@ mod dl {
             // Windows >= 7 supports thread error mode.
             let result = SetThreadErrorMode(new_error_mode, &mut prev_error_mode);
             if result == 0 {
-                let err = os::errno();
+                let err = GetLastError();
                 if err as libc::c_int == ERROR_CALL_NOT_IMPLEMENTED {
                     use_thread_mode = false;
                     // SetThreadErrorMode not found. use fallback solution:
@@ -314,19 +317,24 @@ mod dl {
                 // beware: Vec/String may change errno during drop!
                 // so we get error here.
                 if result == ptr::null_mut() {
-                    let errno = os::errno();
-                    Err(os::error_string(errno))
+                    let errno = GetLastError();
+                    Err(win_error_string(errno))
                 } else {
                     Ok(result as *mut u8)
                 }
             }
             None => {
                 let mut handle = ptr::null_mut();
-                let succeeded =
-                    unsafe { GetModuleHandleExW(0 as libc::DWORD, ptr::null(), &mut handle) };
-                if succeeded == libc::FALSE {
-                    let errno = os::errno();
-                    Err(os::error_string(errno))
+                let succeeded = unsafe {
+                    GetModuleHandleExW(
+                        0 as windows_sys::Win32::Foundation::DWORD,
+                        ptr::null(),
+                        &mut handle,
+                    )
+                };
+                if succeeded == 0 {
+                    let errno = GetLastError();
+                    Err(win_error_string(errno))
                 } else {
                     Ok(handle as *mut u8)
                 }
@@ -353,7 +361,7 @@ mod dl {
 
             let result = f();
 
-            let error = os::errno();
+            let error = GetLastError();
             if 0 == error {
                 Ok(result)
             } else {
@@ -371,19 +379,53 @@ mod dl {
     }
 
     #[allow(non_snake_case)]
-    extern "system" {
+    unsafe extern "system" {
         fn SetLastError(error: libc::size_t);
         fn LoadLibraryW(name: *const libc::c_void) -> *mut libc::c_void;
         fn GetModuleHandleExW(
-            dwFlags: libc::DWORD,
+            dwFlags: windows_sys::Win32::Foundation::DWORD,
             name: *const u16,
             handle: *mut *mut libc::c_void,
-        ) -> libc::BOOL;
+        ) -> BOOL;
         fn GetProcAddress(
             handle: *mut libc::c_void,
             name: *const libc::c_char,
         ) -> *mut libc::c_void;
         fn FreeLibrary(handle: *mut libc::c_void);
         fn SetErrorMode(uMode: libc::c_uint) -> libc::c_uint;
+    }
+
+    use std::os::windows::ffi::OsStringExt;
+
+    use windows_sys::Win32::{
+        Foundation::{FORMAT_MESSAGE_FROM_SYSTEM, FORMAT_MESSAGE_IGNORE_INSERTS},
+        Globalization::FormatMessageW,
+    };
+
+    fn win_error_string(err: u32) -> String {
+        let mut buffer: [u16; 512] = [0; 512];
+
+        unsafe {
+            let len = FormatMessageW(
+                FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                std::ptr::null(),
+                err,
+                0, // language ID (0 = auto)
+                buffer.as_mut_ptr(),
+                buffer.len() as u32,
+                std::ptr::null_mut(),
+            );
+
+            if len == 0 {
+                return format!("OS Error {}", err);
+            }
+
+            // Convert UTF-16 → Rust string
+            let msg = OsString::from_wide(&buffer[..len as usize])
+                .to_string_lossy()
+                .into_owned();
+
+            msg.trim().to_string() // remove extra newline added by Windows
+        }
     }
 }
